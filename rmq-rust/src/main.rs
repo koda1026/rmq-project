@@ -3,6 +3,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn gauss_summation_interval(l: usize, r: usize) -> usize {
+    /**
+     * This interval is given by (l; r]
+     * so the start index is ommited, while the end index
+     * is included
+     */
+    let result;
+    
+    let n = r - l;
+    result = n / 2 * (n + 1) + if n & 0b1 == 1 { (n + 1) >> 1 } else { 0 };
+    result + l * n;
+
+    result
+}
+
 trait Rmq<'a> {
     fn name() -> String;
     /// To save time, only run benchmarks up to this n.
@@ -41,6 +56,55 @@ impl<'a> Rmq<'a> for Naive<'a> {
 // -------------------------------------------------------------
 // TODO: Implement the Rmq trait for additional data structures.
 // -------------------------------------------------------------
+
+struct LookupTable {
+    table: Box<[u64]>,
+    array_size: usize,
+}
+impl<'a> Rmq<'a> for LookupTable {
+    fn name() -> String {
+        "Lookup table implementation".to_string()
+    }
+
+    fn max_n() -> usize {
+        // NOTE: Do not use this for the improved implementations!
+        10_000
+    }
+    
+    fn build(data: &'a [u64]) -> Self {
+        // create array with l * r entries
+        // n values for l and n - l for r
+        // n / 2 * (n + 1)
+        let number_of_entries = gauss_summation_interval(0, data.len());
+        let mut table: Box<[u64]> = vec![0; number_of_entries].into_boxed_slice();
+
+
+        // querry entire data with for array
+        let mut k = 0;
+        for i in 0..data.len() {
+            for j in i..data.len() {
+                table[k] = data[i..=j].iter().copied().min().unwrap();
+                k += 1;
+            }
+        }
+        // safe values to array
+
+        Self {
+            table: table,
+            array_size: data.len(),
+        }
+    }
+
+
+    fn space(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+        
+    fn query(&self, l: usize, r: usize) -> u64 {
+        let index = gauss_summation_interval(self.array_size - l, self.array_size) + r;
+        self.table[index]
+    }
+}
 
 /// The input data.
 struct Input {
@@ -120,6 +184,7 @@ fn main() {
     }
     for input in inputs {
         bench::<Naive>(&input);
+        bench::<LookupTable>(&input);
         // TODO: Add other implementations here.
     }
 }
