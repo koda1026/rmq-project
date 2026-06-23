@@ -9,11 +9,11 @@ fn gauss_summation_interval(l: usize, r: usize) -> usize {
      * so the start index is ommited, while the end index
      * is included
      */
-    let result;
+    let mut result;
     
     let n = r - l;
     result = n / 2 * (n + 1) + if n & 0b1 == 1 { (n + 1) >> 1 } else { 0 };
-    result + l * n;
+    result += l * n;
 
     result
 }
@@ -101,7 +101,7 @@ impl<'a> Rmq<'a> for LookupTable {
     }
         
     fn query(&self, l: usize, r: usize) -> u64 {
-        let index = gauss_summation_interval(self.array_size - l, self.array_size) + r;
+        let index = gauss_summation_interval(self.array_size - l, self.array_size) + r - l;
         self.table[index]
     }
 }
