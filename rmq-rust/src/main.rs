@@ -119,22 +119,16 @@ impl<'a> Rmq<'a> for SparseArray {
         
         let k = n.ilog2() as usize;
 
-        // (n + 1 - 2^l) for l in 0..=k
-        // (n + 1)(k + 1) - sum(2^l, 0 to =k)
-        // (n + 1)(k + 1) - (n - 1)
-        // nk + n + k + 1 + 1 - n
         let mut sparse_table: Vec<u64> = Vec::with_capacity((n + 1) * (k + 1) + 1 - n);
 
         for l in 0..=k {
             let interval_size = 0b1 << l;
-            // eprintln!("\nThe current l: {}", l);
             for i in 0..n + 1 - interval_size {
                 sparse_table.push(data[i..i + interval_size].iter().copied().min().unwrap());
 
             }
         }
 
-        // eprintln!("The final output: {}", sparse_table[sparse_table.len() - 1]);
 
         Self {
             sparse_table,
@@ -155,20 +149,161 @@ impl<'a> Rmq<'a> for SparseArray {
 
         let interval_index = (r - l).ilog2() as usize;
 
-        // (n + 1) * l - sum(2^l, 0 to k) (sum of greater and greater powers of 2 is just lsb l
-        // bits set to one)
         let mut i: usize = (self.n + 1) * interval_index;
-        // eprintln!("The query start index i: {:b} with the interval index: {}, r:{}, l:{}", i, interval_index, r,l);
         i -= !(usize::MAX << interval_index);
-        // eprintln!("The query start index i: {:b}", i);
-        // (n + 1) * (k + 1) + 1 - n
-        // subtract powers of 2 ascending: fill up integer with ones starting on the right side
-        // usize::MAX << interval_index and flip
 
         let l_true = self.sparse_table[i + l];
         let r_true = self.sparse_table[i + r - (0b1 << interval_index)];
         std::cmp::min(l_true, r_true)
     }
+}
+
+
+struct SegmentTree {
+    segment_tree: Vec<Vec<u64>>,
+    n: usize,
+    k: usize,
+
+}
+
+impl SegmentTree {
+        fn recursive_query(&self, l:usize, r:usize, k:usize) -> u64{
+        if l == r { // break condition
+            return self.segment_tree[k][l];
+
+        }
+
+        let mut next_l = l;
+        let mut next_r = r;
+        let mut depth_minimum = u64::MAX;
+        if l & 0b1 != 0 {
+            depth_minimum = self.segment_tree[k][l];
+            next_l += 1;
+        }
+        if r & 0b1 != 0 {
+            depth_minimum = std::cmp::min(depth_minimum, self.segment_tree[k][r- 1]);
+            next_r -= 1;
+        }
+
+        let relevant_diff = std::cmp::min(next_l.trailing_zeros(), next_r.trailing_zeros()) as usize;
+        let next_k = k + relevant_diff;
+        next_l >>= relevant_diff;
+        next_r >>= relevant_diff;
+        
+        std::cmp::min(depth_minimum, self.recursive_query(next_l, next_r, next_k))
+    }
+
+}
+
+impl<'a> Rmq<'a> for SegmentTree {
+    fn name() -> String {
+        "Segment tree".to_string()
+    }
+
+    fn build(data: &'a [u64]) -> Self {
+        let n = data.len();
+        
+        let k = n.ilog2() as usize;
+
+        let mut segment_tree: Vec<Vec<u64>> = vec![Vec::new(); k + 1];
+
+        for l in 0..=k {
+            let interval_size = 0b1 << l;
+            for i in 0..n / interval_size {
+                let block_index = i * interval_size;
+                segment_tree[l].push(data[block_index..block_index + interval_size].iter().copied().min().unwrap());
+
+            }
+        }
+
+
+        Self {
+            segment_tree,
+            n,
+            k,
+        }
+    }
+
+    fn space(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+
+    // recursive implementation possible
+    fn query(&self, l: usize, r: usize) -> u64 {
+        assert!(l <= r); // requirement
+        
+        self.recursive_query(l, r, 0)
+    }
+}
+
+struct Blocks {
+    segments: SparseArray,
+    preffix_table: Vec<u64>,
+    suffix_table: Vec<u64>,
+    n: usize,
+    s: usize,
+    block_count: usize,
+}
+
+impl<'a> Rmq<'a> for Blocks{
+    fn name() -> String {
+        "Blocks".to_string()
+    }
+
+    fn build(data: &'a [u64]) -> Self {
+        let n = data.len();
+        let block_size = n.ilog2() as usize;
+        let block_count = n / block_size;
+        let mut block_minima: Vec<u64> = Vec::with_capacity(block_count);
+
+        // TODO: check index in end and beginning
+        for i in 0..block_count {
+            block_minima.push(data[i*block_size..(i + 1)*clock_size]);
+        }
+
+        let mut prefix_table: Vec<u64> = Vec::with_capacity(n);
+        let mut suffix_table: Vec<u64> = Vec::with_capacity(n);
+
+        let mut minimum = u64::MAX;
+        for i in 0..n {
+            if i % block_size == 0 {
+                minimum = u64::MAX;
+            }
+            suffix_table.push(std::cmp::min(data[i], minimum));
+        }
+
+        for i in (0..n).rev() {
+            if i % block_size == 0 {
+                minimum = u64::MAX;
+            }
+            prefix_table.push(std::cmp::min(data[i], minimum));
+        }
+
+        Self {
+            segments: SparseArray::build(block_minima),
+            prefix_table: prefix_table,
+            suffix_table: suffix_table,
+            n: n,
+            s: block_size,
+            block_count: block_count,
+        }
+    }
+
+    /// Space usage in bytes.
+    fn space(&self) -> usize {
+        std::mem::size_of_val(self)
+    }
+
+    fn query(&self, l: usize, r: usize) -> u64 {
+        let l_block = l / self.s + if l % self.s != 0 { 1 } else { 0 };
+        let r_block = r / self.s;
+
+        let pre_minimum = std::cmp::min(self.prefix_table[l], self.segments.query(l_block, r_block));
+
+        std::cmp::min(pre_minimum, self.suffix_table[r]))        
+    }
+        
+   
 }
 
 /// The input data.
@@ -250,7 +385,7 @@ fn main() {
     for input in inputs {
         bench::<Naive>(&input);
         bench::<LookupTable>(&input);
-        bench::<SparseArray>(&input);
+        bench::<SegmentTree>(&input);
         // TODO: Add other implementations here.
     }
 }
