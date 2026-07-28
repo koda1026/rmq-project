@@ -4,11 +4,9 @@ use std::{
 };
 
 fn gauss_summation_interval(l: usize, r: usize) -> usize {
-    /**
-     * This interval is given by (l; r]
-     * so the start index is ommited, while the end index
-     * is included
-     */
+     // This interval is given by (l; r]
+     // so the start index is ommited, while the end index
+     // is included
     let mut result;
     
     let n = r - l;
@@ -46,7 +44,7 @@ impl<'a> Rmq<'a> for Naive<'a> {
         Self { data }
     }
     fn space(&self) -> usize {
-        std::mem::size_of_val(self)
+        std::mem::size_of_val(self.data)
     }
     fn query(&self, l: usize, r: usize) -> u64 {
         self.data[l..=r].iter().copied().min().unwrap()
@@ -78,7 +76,6 @@ impl<'a> Rmq<'a> for LookupTable {
         let number_of_entries = gauss_summation_interval(0, data.len());
         let mut table: Box<[u64]> = vec![0; number_of_entries].into_boxed_slice();
 
-
         // querry entire data with for array
         let mut k = 0;
         for i in 0..data.len() {
@@ -97,12 +94,80 @@ impl<'a> Rmq<'a> for LookupTable {
 
 
     fn space(&self) -> usize {
-        std::mem::size_of_val(self)
+        std::mem::size_of_val(&*self.table)
     }
         
     fn query(&self, l: usize, r: usize) -> u64 {
         let index = gauss_summation_interval(self.array_size - l, self.array_size) + r - l;
         self.table[index]
+    }
+}
+
+struct SparseArray {
+    sparse_table: Vec<u64>,
+    n: usize,
+    k: usize,
+}
+
+impl<'a> Rmq<'a> for SparseArray {
+    fn name() -> String {
+        "Sparse Array".to_string()
+    }
+
+    fn build(data: &'a [u64]) -> Self {
+        let n = data.len();
+        
+        let k = n.ilog2() as usize;
+
+        // (n + 1 - 2^l) for l in 0..=k
+        // (n + 1)(k + 1) - sum(2^l, 0 to =k)
+        // (n + 1)(k + 1) - (n - 1)
+        // nk + n + k + 1 + 1 - n
+        let mut sparse_table: Vec<u64> = Vec::with_capacity((n + 1) * (k + 1) + 1 - n);
+
+        for l in 0..=k {
+            let interval_size = 0b1 << l;
+            // eprintln!("\nThe current l: {}", l);
+            for i in 0..n + 1 - interval_size {
+                sparse_table.push(data[i..i + interval_size].iter().copied().min().unwrap());
+
+            }
+        }
+
+        // eprintln!("The final output: {}", sparse_table[sparse_table.len() - 1]);
+
+        Self {
+            sparse_table,
+            n,
+            k,
+        }
+    }
+
+    fn space(&self) -> usize {
+        std::mem::size_of_val(&self.sparse_table)
+    }
+    
+    fn query(&self, l: usize, r: usize) -> u64 {
+        assert!(l <= r); // requirement
+        if l == r { // TODO: check handling and condition in other cases
+            return self.sparse_table[l];
+        }
+
+        let interval_index = (r - l).ilog2() as usize;
+
+        // (n + 1) * l - sum(2^l, 0 to k) (sum of greater and greater powers of 2 is just lsb l
+        // bits set to one)
+        let mut i: usize = (self.n + 1) * interval_index;
+        // eprintln!("The query start index i: {:b} with the interval index: {}, r:{}, l:{}", i, interval_index, r,l);
+        i -= !(usize::MAX << interval_index);
+        // eprintln!("The query start index i: {:b}", i);
+        // (n + 1) * (k + 1) + 1 - n
+        // subtract powers of 2 ascending: fill up integer with ones starting on the right side
+        // usize::MAX << interval_index and flip
+
+        let l_true = self.sparse_table[i + l];
+        let r_true = self.sparse_table[i + r - (0b1 << interval_index)];
+        std::cmp::min(l_true, r_true)
     }
 }
 
@@ -185,6 +250,7 @@ fn main() {
     for input in inputs {
         bench::<Naive>(&input);
         bench::<LookupTable>(&input);
+        bench::<SparseArray>(&input);
         // TODO: Add other implementations here.
     }
 }
