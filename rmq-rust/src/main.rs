@@ -1,7 +1,8 @@
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    collections::{HashMap, VecDeque}
+    collections::{HashMap, VecDeque},
+    mem::{size_of, size_of_val},
 };
 
 fn gauss_summation_interval(l: usize, r: usize) -> usize {
@@ -115,6 +116,10 @@ impl<'a> Rmq<'a> for SparseArray {
         "Sparse Array".to_string()
     }
 
+    fn max_n() -> usize {
+        // NOTE: Do not use this for the improved implementations!
+        10_000
+    }
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         
@@ -139,7 +144,7 @@ impl<'a> Rmq<'a> for SparseArray {
     }
 
     fn space(&self) -> usize {
-        std::mem::size_of_val(&self.sparse_table)
+        size_of_val(&self.sparse_table) + size_of::<u64>() * self.sparse_table.capacity()
     }
     
     fn query(&self, l: usize, r: usize) -> u64 {
@@ -201,6 +206,10 @@ impl<'a> Rmq<'a> for SegmentTree {
         "Segment tree".to_string()
     }
 
+    fn max_n() -> usize {
+        // NOTE: Do not use this for the improved implementations!
+        10_000
+    }
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         
@@ -251,6 +260,10 @@ impl<'a> Rmq<'a> for Blocks{
         "Blocks".to_string()
     }
 
+    fn max_n() -> usize {
+        // NOTE: Do not use this for the improved implementations!
+        10_000
+    }
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         let block_size = n.ilog2() as usize;
@@ -413,6 +426,10 @@ impl<'a> Rmq<'a> for CartesianTree<'a> {
         "Cartesian Tree".to_string()
     }
 
+    fn max_n() -> usize {
+        // NOTE: Do not use this for the improved implementations!
+        10_000
+    }
     fn build(data: &'a [u64]) -> Self {
         let block_size = (data.len().ilog2() / 4) as usize;
         let block_count = data.len() / block_size;
@@ -499,9 +516,9 @@ fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
     let rmq = RMQ::build(&input.data);
     eprint!("{:>10}\t", rmq.space());
     let start = std::time::Instant::now();
-    let mut sum = 0;
+    let mut sum:u64 = 0;
     for &(l, r) in &input.queries {
-        sum += rmq.query(l, r);
+        sum = sum.wrapping_add(rmq.query(l, r));
     }
     let elapsed = start.elapsed().as_nanos() as f64 / input.queries.len() as f64;
     println!(
@@ -539,6 +556,10 @@ fn main() {
     for input in inputs {
         bench::<Naive>(&input);
         bench::<LookupTable>(&input);
+        bench::<SparseArray>(&input);
+        // bench::<SegmentTree>(&input);
+        // bench::<Blocks>(&input);
+        // bench::<CartesianTrees>(&input);
         // TODO: Add other implementations here.
     }
 }
