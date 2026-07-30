@@ -127,7 +127,7 @@ impl<'a> Rmq<'a> for SparseArray {
         
         let k = n.ilog2() as usize;
 
-        let mut sparse_table: Vec<Vec<u64>> = Vec::with_capacity(k);
+        let mut sparse_table: Vec<Vec<u64>> = Vec::with_capacity(k + 1);
 
         for l in 0..=k {
             let interval_size = 0b1 << l;
@@ -176,35 +176,6 @@ struct SegmentTree {
     k: usize,
 }
 
-impl SegmentTree {
-    fn recursive_query(&self, l:usize, r:usize, k:usize) -> u64{
-        if l == r { // break condition
-            return self.segment_tree[k][l];
-
-        }
-
-        let mut next_l = l;
-        let mut next_r = r;
-        let mut depth_minimum = u64::MAX;
-        if l & 0b1 != 0 {
-            depth_minimum = self.segment_tree[k][l];
-            next_l += 1;
-        }
-        if r & 0b1 != 0 {
-            depth_minimum = cmp::min(depth_minimum, self.segment_tree[k][r- 1]);
-            next_r -= 1;
-        }
-
-        let relevant_diff = cmp::min(next_l.trailing_zeros(), next_r.trailing_zeros()) as usize;
-        let next_k = k + relevant_diff;
-        next_l >>= relevant_diff;
-        next_r >>= relevant_diff;
-        
-        cmp::min(depth_minimum, self.recursive_query(next_l, next_r, next_k))
-    }
-
-}
-
 impl<'a> Rmq<'a> for SegmentTree {
     fn name() -> String {
         "Segment tree".to_string()
@@ -220,15 +191,17 @@ impl<'a> Rmq<'a> for SegmentTree {
         
         let k = n.ilog2() as usize;
 
-        let mut segment_tree: Vec<Vec<u64>> = vec![Vec::new(); k + 1];
+        let mut segment_tree: Vec<Vec<u64>> = Vec::with_capacity(k + 1);
 
         for l in 0..=k {
             let interval_size = 0b1 << l;
+            let mut interval_table = Vec::with_capacity(n / k);
             for i in 0..n / interval_size {
                 let block_index = i * interval_size;
-                segment_tree[l].push(data[block_index..block_index + interval_size].iter().copied().min().unwrap());
+                interval_table.push(data[block_index..block_index + interval_size].iter().copied().min().unwrap());
 
             }
+            segment_tree.push(interval_table);
         }
 
 
@@ -627,11 +600,11 @@ fn main() {
     }
     let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
-        bench::<Naive>(&input, &mut query_monitor);
+        // bench::<Naive>(&input, &mut query_monitor);
         //bench::<LookupTable>(&input, query_monitor);
         // bench::<SparseArray>(&input, &mut query_monitor);
-        bench::<SegmentTree>(&input, &mut query_monitor);
-        // bench::<Blocks>(&input);
+        // bench::<SegmentTree>(&input, &mut query_monitor);
+        bench::<Blocks>(&input);
         // bench::<CartesianTrees>(&input);
         // TODO: Add other implementations here.
     }
