@@ -1,9 +1,11 @@
 use std::{
-    io::Read,
-    path::{Path, PathBuf},
     collections::{HashMap, VecDeque},
+    fs,
+    hash::Hash,
+    io::Read,
     mem::{size_of, size_of_val},
-    fs
+    path::{Path, PathBuf},
+    cmp,
 };
 
 fn gauss_summation_interval(l: usize, r: usize) -> usize {
@@ -107,9 +109,8 @@ impl<'a> Rmq<'a> for LookupTable {
 }
 
 struct SparseArray {
-    sparse_table: Vec<u64>,
+    sparse_table: Vec<Vec<u64>>,
     n: usize,
-    k: usize,
 }
 
 impl<'a> Rmq<'a> for SparseArray {
@@ -126,55 +127,57 @@ impl<'a> Rmq<'a> for SparseArray {
         
         let k = n.ilog2() as usize;
 
-        let mut sparse_table: Vec<u64> = Vec::with_capacity((n + 1) * (k + 1) + 1 - n);
+        let mut sparse_table: Vec<Vec<u64>> = Vec::with_capacity(k);
 
         for l in 0..=k {
             let interval_size = 0b1 << l;
+            let mut interval_table: Vec<u64> = Vec::with_capacity(n + 1 - interval_size);
             for i in 0..n + 1 - interval_size {
-                sparse_table.push(data[i..i + interval_size].iter().copied().min().unwrap());
+                interval_table.push(data[i..i + interval_size].iter().copied().min().unwrap());
 
             }
+
+            sparse_table.push(interval_table);
         }
 
 
         Self {
             sparse_table,
             n,
-            k,
         }
     }
 
     fn space(&self) -> usize {
-        size_of_val(&self.sparse_table) + size_of::<u64>() * self.sparse_table.capacity()
+        // space of the level list
+        let mut total_size = size_of_val(&self.sparse_table);
+        total_size += size_of::<Vec<u64>>() * self.sparse_table.capacity();
+
+        // space of each individual levels
+        for l in 0..self.sparse_table.len() {
+            total_size += size_of::<u64>() * self.sparse_table[l].capacity();
+        }
+
+        return total_size;
     }
     
     fn query(&self, l: usize, r: usize) -> u64 {
         assert!(l <= r); // requirement
-        if l == r { // TODO: check handling and condition in other cases
-            return self.sparse_table[l];
-        }
+        let depth = ((r + 1) - l).ilog2() as usize;
 
-        let interval_index = (r - l).ilog2() as usize;
-
-        let mut i: usize = (self.n + 1) * interval_index;
-        i -= !(usize::MAX << interval_index);
-
-        let l_true = self.sparse_table[i + l];
-        let r_true = self.sparse_table[i + r - (0b1 << interval_index)];
-        std::cmp::min(l_true, r_true)
+        let l_min = self.sparse_table[depth][l];
+        let r_min = self.sparse_table[depth][(r + 1) - (0b1 << depth)];
+        cmp::min(l_min, r_min)
     }
 }
 
 
 struct SegmentTree {
     segment_tree: Vec<Vec<u64>>,
-    n: usize,
     k: usize,
-
 }
 
 impl SegmentTree {
-        fn recursive_query(&self, l:usize, r:usize, k:usize) -> u64{
+    fn recursive_query(&self, l:usize, r:usize, k:usize) -> u64{
         if l == r { // break condition
             return self.segment_tree[k][l];
 
@@ -188,16 +191,16 @@ impl SegmentTree {
             next_l += 1;
         }
         if r & 0b1 != 0 {
-            depth_minimum = std::cmp::min(depth_minimum, self.segment_tree[k][r- 1]);
+            depth_minimum = cmp::min(depth_minimum, self.segment_tree[k][r- 1]);
             next_r -= 1;
         }
 
-        let relevant_diff = std::cmp::min(next_l.trailing_zeros(), next_r.trailing_zeros()) as usize;
+        let relevant_diff = cmp::min(next_l.trailing_zeros(), next_r.trailing_zeros()) as usize;
         let next_k = k + relevant_diff;
         next_l >>= relevant_diff;
         next_r >>= relevant_diff;
         
-        std::cmp::min(depth_minimum, self.recursive_query(next_l, next_r, next_k))
+        cmp::min(depth_minimum, self.recursive_query(next_l, next_r, next_k))
     }
 
 }
@@ -211,6 +214,7 @@ impl<'a> Rmq<'a> for SegmentTree {
         // NOTE: Do not use this for the improved implementations!
         10_000
     }
+
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         
@@ -230,20 +234,49 @@ impl<'a> Rmq<'a> for SegmentTree {
 
         Self {
             segment_tree,
-            n,
             k,
         }
     }
 
     fn space(&self) -> usize {
-        std::mem::size_of_val(self)
-    }
+        // space of the level list
+        let mut total_size = size_of_val(&self.segment_tree);
+        total_size += size_of::<Vec<u64>>() * self.segment_tree.capacity();
 
+        // space of each individual levels
+        for l in 0..self.segment_tree.len() {
+            total_size += size_of::<u64>() * self.segment_tree[l].capacity();
+        }
+
+        total_size += size_of_val(&self.k);
+
+        return total_size;
+    }
+ 
     // recursive implementation possible
     fn query(&self, l: usize, r: usize) -> u64 {
-        assert!(l <= r); // requirement
+        let mut new_l = l;
+        let mut new_r = r + 1;
+
+        let mut total_minimum = u64::MAX;
+        let mut level = 0;
+        while new_l != new_r {
+            if new_l & (0b1 << level) != 0{
+                let row = &self.segment_tree[level];
+                //if (new_l >> level) == 3 {
+                //    eprintln!("\nData struct len:{}, row len:{}\nl:{:b}\t{}\t{:b}\nr:{:b}\t{}\t{:b}", self.segment_tree.len(), row.len(), l,l,new_l,r, r,new_r);
+                //}
+                total_minimum = cmp::min(row[new_l >> level], total_minimum);
+                new_l += 0b1 << level;
+            }
+            if new_r & (0b1 << level) != 0 {
+                total_minimum = cmp::min(self.segment_tree[level][(new_r >> level) - 1], total_minimum);
+                new_r -= 0b1 << level;
+            }
+            level += 1;
+        }
         
-        self.recursive_query(l, r, 0)
+        return total_minimum;
     }
 }
 
@@ -284,14 +317,14 @@ impl<'a> Rmq<'a> for Blocks{
             if i % block_size == 0 {
                 minimum = u64::MAX;
             }
-            suffix_table.push(std::cmp::min(data[i], minimum));
+            suffix_table.push(cmp::min(data[i], minimum));
         }
 
         for i in (0..n).rev() {
             if i % block_size == 0 {
                 minimum = u64::MAX;
             }
-            prefix_table.push(std::cmp::min(data[i], minimum));
+            prefix_table.push(cmp::min(data[i], minimum));
         }
 
         Self {
@@ -314,9 +347,9 @@ impl<'a> Rmq<'a> for Blocks{
         let l_block = l / self.s + if l % self.s != 0 { 1 } else { 0 };
         let r_block = r / self.s;
 
-        let pre_minimum = std::cmp::min(self.prefix_table[l], self.segments.query(l_block, r_block));
+        let pre_minimum = cmp::min(self.prefix_table[l], self.segments.query(l_block, r_block));
 
-        std::cmp::min(pre_minimum, self.suffix_table[r])
+        cmp::min(pre_minimum, self.suffix_table[r])
     }
 }
 
@@ -469,7 +502,7 @@ impl<'a> Rmq<'a> for CartesianTree<'a> {
         } else {
             let left_minimum = self.data[self.tree_lookup_tables[&self.tree_blocks[left_block]][l % self.block_size][self.block_size]];
             let right_minimum = self.data[self.tree_lookup_tables[&self.tree_blocks[right_block]][0][r % self.block_size]];
-            minimum = std::cmp::min(left_minimum, right_minimum);
+            minimum = cmp::min(left_minimum, right_minimum);
         }
 
         return minimum;
@@ -529,16 +562,15 @@ impl Query_Monitor {
         data.push_str(&self.name);
         data.push_str(&"\n".to_string());
         for i in 0..self.queries.len() {
-            data.push_str(format!("l:{}\tr:{}\t{}", self.queries[i].0, self.queries[i].1, self.queries[i].2).as_str());
+            data.push_str(format!("l:{}\tr:{}\t{}\n", self.queries[i].0, self.queries[i].1, self.queries[i].2).as_str());
         }
-        println!(data);
+        println!("{}", data);
     }
 }
 
 /// Bench the given RMQ implementation on the given input, and print the results in CSV format.
-fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
+fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input, query_monitor: &mut HashMap<(usize, usize), u64>) {
     eprint!("{:>10}\t{:>30}\t", input.data.len(), RMQ::name());
-    let mut query_monitor = Query_Monitor::build(RMQ::name());
     if input.data.len() > RMQ::max_n() {
         eprintln!("skipped");
         return;
@@ -550,11 +582,17 @@ fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
     let mut sum:u64 = 0;
     for &(l, r) in &input.queries {
         let minimum = rmq.query(l, r);
+        if query_monitor.contains_key(&(l,r)) {
+            let old = query_monitor[&(l,r)];
+            if old != minimum {
+                println!("l:{}\tr:{}\tinterval_size:{}\told:{}\tnew:{}",l,r,r-l,old,minimum);
+            }
+        } else {
+            query_monitor.insert((l,r), minimum);
+        }
         sum = sum.wrapping_add(minimum);
-        query_monitor.add_query(l, r, minimum);
     }
     let elapsed = start.elapsed().as_nanos() as f64 / input.queries.len() as f64;
-    query_monitor.write_to_file("unimportant");
     //println!(
     //    "{},{},\"{}\",{},{},{}",
     //    input.data.len(),
@@ -587,11 +625,12 @@ fn main() {
         }
         inputs.sort_by_key(|input| input.data.len());
     }
+    let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
-        bench::<Naive>(&input);
-        bench::<LookupTable>(&input);
-        bench::<SparseArray>(&input);
-        // bench::<SegmentTree>(&input);
+        bench::<Naive>(&input, &mut query_monitor);
+        //bench::<LookupTable>(&input, query_monitor);
+        // bench::<SparseArray>(&input, &mut query_monitor);
+        bench::<SegmentTree>(&input, &mut query_monitor);
         // bench::<Blocks>(&input);
         // bench::<CartesianTrees>(&input);
         // TODO: Add other implementations here.
