@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
     collections::{HashMap, VecDeque},
     mem::{size_of, size_of_val},
+    fs
 };
 
 fn gauss_summation_interval(l: usize, r: usize) -> usize {
@@ -505,9 +506,39 @@ fn read_input(file: &Path) -> Input {
     Input { data, queries }
 }
 
+/// Monitor the queries during bench
+struct Query_Monitor {
+    name: String,
+    queries: Vec<(usize, usize, u64)>,
+}
+
+impl Query_Monitor {
+    fn build(name: String) -> Self{
+        Self {
+            name: name,
+            queries: Vec::new(),
+        }
+    }
+
+    fn add_query(&mut self, left: usize, right: usize, minimum: u64) {
+        self.queries.push((left, right, minimum));
+    }
+
+    fn write_to_file(&mut self, file_name: String) {
+        let mut data: String = String::new();
+        data.push_str(&self.name);
+        data.push_str(&"\n".to_string());
+        for i in 0..self.queries.len() {
+            data.push_str(format!("l:{}\tr:{}\t{}", self.queries[i].0, self.queries[i].1, self.queries[i].2).as_str());
+        }
+        println!(data);
+    }
+}
+
 /// Bench the given RMQ implementation on the given input, and print the results in CSV format.
 fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
     eprint!("{:>10}\t{:>30}\t", input.data.len(), RMQ::name());
+    let mut query_monitor = Query_Monitor::build(RMQ::name());
     if input.data.len() > RMQ::max_n() {
         eprintln!("skipped");
         return;
@@ -518,23 +549,26 @@ fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
     let start = std::time::Instant::now();
     let mut sum:u64 = 0;
     for &(l, r) in &input.queries {
-        sum = sum.wrapping_add(rmq.query(l, r));
+        let minimum = rmq.query(l, r);
+        sum = sum.wrapping_add(minimum);
+        query_monitor.add_query(l, r, minimum);
     }
     let elapsed = start.elapsed().as_nanos() as f64 / input.queries.len() as f64;
-    println!(
-        "{},{},\"{}\",{},{},{}",
-        input.data.len(),
-        input.queries.len(),
-        RMQ::name(),
-        rmq.space(),
-        sum,
-        elapsed
-    );
+    query_monitor.write_to_file("unimportant");
+    //println!(
+    //    "{},{},\"{}\",{},{},{}",
+    //    input.data.len(),
+    //    input.queries.len(),
+    //    RMQ::name(),
+    //    rmq.space(),
+    //    sum,
+    //    elapsed
+    //);
     eprintln!("{:>3}\t{:>8.2}ns/q", sum % 1000, elapsed);
 }
 
 fn main() {
-    println!("n,q,name,space,sum,time");
+    //println!("n,q,name,space,sum,time");
 
     let file_or_dir = PathBuf::from(std::env::args().nth(1).expect("Usage: bench <input_dir>"));
 
