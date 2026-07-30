@@ -312,22 +312,22 @@ struct TreeNumber{
 }
 
 impl TreeNumber{
-    fn add_child_value(&self, child_number: &Self) {
+    fn add_child_value(&mut self, child_number: &Self) {
         // 1. appropriately shift value
-        let size_of_block = std::mem::size_of_val(usize::MAX) * 8; // in bits not in bytes
-        let additional_blocks = child_number.bit_count / size_of_blocks;
-        let left_over_bits = child_number.bit_count % size_of_blocks;
+        let size_of_block = std::mem::size_of_val(&usize::MAX) * 8; // in bits not in bytes
+        let additional_blocks = child_number.bit_count / size_of_block;
+        let left_over_bits = child_number.bit_count % size_of_block;
         // 1.2 move bits in vector(copy elements, then shift)
-        if (self.bit_count % size_of_blocks + left_over_bits) > size_of_blocks {
-            self.number.push(0);
+        if (self.bit_count % size_of_block + left_over_bits) > size_of_block {
+            self.number.insert(self.number.len(), 0);
         }
 
         let mut buffer = 0;
         let mut prev_bits = 0;
-        for block in self.number {
-            buffer = block;
-            block <<= left_over_bits;
-            block |= prev_bits;
+        for i in 0..self.number.len(){
+            buffer = self.number[i];
+            self.number[i] <<= left_over_bits;
+            self.number[i] |= prev_bits;
             prev_bits = buffer >> size_of_block - left_over_bits;
         }
 
@@ -338,28 +338,32 @@ impl TreeNumber{
 
         // 2. add child number
         for i in 0..child_number.number.len() {
-            self.number[i] |= child_number[i];
+            self.number[i] |= child_number.number[i];
         }
 
         // 3. update meta data
         self.bit_count += child_number.bit_count;
     }
 
-    fn add_dead_end(&self) {
-        self.add_child_value(Self { number: VecDeque::from([0b0]), bit_count: 0 });
+    fn add_dead_end(&mut self) {
+        self.add_child_value(&Self { number: VecDeque::from([0b0]), bit_count: 0 });
+    }
+
+    fn get_number(&self) -> VecDeque<usize> {
+        self.number.clone()
     }
 }
 
 struct CartesianTree<'a> {
     data: &'a [u64],
-    tree_blocks: Vec<TreeNumber>,
-    tree_lookup_tables: HashMap<TreeNumber,Vec<Vec<usize>>>,
+    tree_blocks: Vec<VecDeque<usize>>,
+    tree_lookup_tables: HashMap<VecDeque<usize>,Vec<Vec<usize>>>,
     block_size: usize,
 }
 
 impl<'a> CartesianTree<'a> {
     // preorder bit encoding with leaves encoded as zeros
-    fn build_tree(block: &[u64], max_shift: usize) -> TreeNumber {
+    fn build_tree(block: &[u64]) -> TreeNumber {
         let mut result = TreeNumber{ number: VecDeque::from([0b1]), bit_count:1 };
 
         let mut min_index = 0;
@@ -374,14 +378,14 @@ impl<'a> CartesianTree<'a> {
 
         if min_index > 0 {
             let left_child = CartesianTree::build_tree(&block[0..min_index]);
-            result.add_child(left_child);
+            result.add_child_value(&left_child);
         } else {
             result.add_dead_end(); // Add zero to end of tree representation (no child)
         }
 
         if min_index < block.len() - 1 {
             let right_child = CartesianTree::build_tree(&block[min_index + 1..block.len()]);
-            result.add_child(right_child);
+            result.add_child_value(&right_child);
         } else {
             result.add_dead_end(); // Add zero to end of tree representation (no child)
         }
@@ -389,13 +393,13 @@ impl<'a> CartesianTree<'a> {
         return result;
     }
 
-    fn build_lookup_table(block: &[u64]) -> Vec<Vec<u64>> {
-        let mut lookup_table:Vec<Vec<u64>> = Vec::with_capacity(block.len());
+    fn build_lookup_table(block: &[u64]) -> Vec<Vec<usize>> {
+        let mut lookup_table:Vec<Vec<usize>> = Vec::with_capacity(block.len());
 
         for l in 0..block.len() {
             let mut row = Vec::with_capacity(block.len() - l);
             for r in l..block.len() {
-                row.push(block[l..r].iter().copied().position(|x| block[l..r].iter().all(|y| x <= y)));
+                row.push(block[l..r].iter().copied().position(|x| block[l..r].iter().all(|&y| x <= y)).unwrap());
             }
             lookup_table.push(row);
         }
@@ -412,16 +416,16 @@ impl<'a> Rmq<'a> for CartesianTree<'a> {
     fn build(data: &'a [u64]) -> Self {
         let block_size = (data.len().ilog2() / 4) as usize;
         let block_count = data.len() / block_size;
-        let mut tree_blocks:Vec<TreeNumber> = Vec::with_capacity(block_count);
-        let mut tree_lookup_tables:HashMap<TreeNumber, Vec<Vec<usize>>> = HashMap::new();
+        let mut tree_blocks:Vec<VecDeque<usize>> = Vec::with_capacity(block_count);
+        let mut tree_lookup_tables:HashMap<VecDeque<usize>, Vec<Vec<usize>>> = HashMap::new();
         
         for block_index in 0..data.len() / block_size {
             let tree_block = CartesianTree::build_tree(&data[block_index * block_size..(block_index + 1) * block_size]);
-            tree_blocks.push(tree_block);
+            tree_blocks.push(tree_block.get_number());
 
-            if !tree_lookup_tables.contains_key(tree_block) {
+            if !tree_lookup_tables.contains_key(&tree_block.get_number()) {
                 let lookup_table = CartesianTree::build_lookup_table(&data[block_index * block_size..(block_index + 1) * block_size]);
-                tree_lookup_tables.insert(tree_block, lookup_table);
+                tree_lookup_tables.insert(tree_block.get_number(), lookup_table);
             }
         }
 
@@ -443,10 +447,10 @@ impl<'a> Rmq<'a> for CartesianTree<'a> {
         let minimum;
 
         if left_block == right_block {
-            minimum = self.data[self.tree_lookup_tables[self.tree_blocks[left_block]][l % self.block_size][r % self.block_size]];
+            minimum = self.data[self.tree_lookup_tables[&self.tree_blocks[left_block]][l % self.block_size][r % self.block_size]];
         } else {
-            let left_minimum = self.data[self.tree_lookup_tables[self.tree_blocks[left_block]][l % self.block_size][self.block_size]];
-            let right_minimum = self.data[self.tree_lookup_tables[tree_blocks[right_block]][0][r % self.block_size]];
+            let left_minimum = self.data[self.tree_lookup_tables[&self.tree_blocks[left_block]][l % self.block_size][self.block_size]];
+            let right_minimum = self.data[self.tree_lookup_tables[&self.tree_blocks[right_block]][0][r % self.block_size]];
             minimum = std::cmp::min(left_minimum, right_minimum);
         }
 
