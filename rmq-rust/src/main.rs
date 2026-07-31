@@ -264,6 +264,7 @@ struct Blocks<'a> {
     data: &'a [u64],
     s: usize,
     block_count: usize,
+    pre_calc: bool,
 }
 
 impl<'a> Rmq<'a> for Blocks<'a>{
@@ -276,6 +277,7 @@ impl<'a> Rmq<'a> for Blocks<'a>{
         10_000
     }
     fn build(data: &'a [u64]) -> Self {
+        let pre_calc = true;
         let n = data.len();
         let block_size = n.ilog2() as usize;
         let block_count = n / block_size;
@@ -286,24 +288,33 @@ impl<'a> Rmq<'a> for Blocks<'a>{
             block_minima.push(data[i*block_size..(i + 1)*block_size].iter().copied().min().unwrap());
         }
 
-        let mut prefix_table: Vec<u64> = vec![u64::MAX; n];
-        let mut suffix_table: Vec<u64> = Vec::with_capacity(n);
+        let mut prefix_table: Vec<u64>;
+        let mut suffix_table: Vec<u64>;
 
-        let mut minimum = u64::MAX;
-        for i in 0..n {
-            if i % block_size == 0 {
-                minimum = u64::MAX;
+        if pre_calc {
+            prefix_table = vec![u64::MAX; n];
+            suffix_table = Vec::with_capacity(n);
+            let mut minimum = u64::MAX;
+            for i in 0..n {
+                if i % block_size == 0 {
+                    minimum = u64::MAX;
+                }
+                minimum = cmp::min(data[i], minimum);
+                suffix_table.push(minimum);
             }
-            suffix_table.push(cmp::min(data[i], minimum));
-        }
 
-        minimum = u64::MAX;
+            minimum = u64::MAX;
 
-        for i in (0..n).rev() {
-            if i % block_size == 0 {
-                minimum = u64::MAX;
+            for i in (0..n).rev() {
+                if i % block_size == 0 {
+                    minimum = u64::MAX;
+                }
+                minimum = cmp::min(data[i], minimum);
+                prefix_table[i] = minimum;
             }
-            prefix_table[i] = cmp::min(data[i], minimum);
+        } else {
+            prefix_table = Vec::with_capacity(0);
+            suffix_table = Vec::with_capacity(0);
         }
 
         // eprintln!("\nblock_size: {block_size}\tblock_count: {block_count}");
@@ -315,12 +326,19 @@ impl<'a> Rmq<'a> for Blocks<'a>{
             data: data,
             s: block_size,
             block_count: block_count,
+            pre_calc: pre_calc,
         }
     }
 
     /// Space usage in bytes.
     fn space(&self) -> usize {
-        std::mem::size_of_val(self)
+        self.blocks.space() +
+        self.prefix_table.capacity() * size_of::<u64>() + size_of_val(&self.prefix_table) +
+        self.suffix_table.capacity() * size_of::<u64>() + size_of_val(&self.suffix_table) +
+        size_of_val(self.data) +
+        size_of_val(&self.s) +
+        size_of_val(&self.block_count) +
+        size_of_val(&self.pre_calc)
     }
 
     fn query(&self, l: usize, r: usize) -> u64 {
@@ -333,10 +351,15 @@ impl<'a> Rmq<'a> for Blocks<'a>{
         let mut total_minimum;
         if l_block < r_block {
             assert!(r_block > 0);
-            // let left_minimum = self.prefix_table[l];
-            let left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
-            // let right_minimum = self.suffix_table[r];
-            let right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+            let left_minimum;
+            let right_minimum;
+            if self.pre_calc {
+                left_minimum = self.prefix_table[l];
+                right_minimum = self.suffix_table[r];
+            } else {
+                left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
+                right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+            }
             r_block -= 1; // inclusive index
             let block_minimum = self.blocks.query(l_block, r_block);
             total_minimum = cmp::min(cmp::min(left_minimum, right_minimum), block_minimum);
