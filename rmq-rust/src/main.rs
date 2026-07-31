@@ -164,6 +164,10 @@ impl<'a> Rmq<'a> for SparseArray {
         assert!(l <= r); // requirement
         let depth = ((r + 1) - l).ilog2() as usize;
 
+        //if depth == 63 {
+        //    eprintln!("l:{l}, r:{r:b}, depth:{depth}, total_len:{}", self.sparse_table.len());
+        //}
+
         let l_min = self.sparse_table[depth][l];
         let r_min = self.sparse_table[depth][(r + 1) - (0b1 << depth)];
         cmp::min(l_min, r_min)
@@ -253,16 +257,16 @@ impl<'a> Rmq<'a> for SegmentTree {
     }
 }
 
-struct Blocks {
-    segments: SparseArray,
+struct Blocks<'a> {
+    blocks: SparseArray,
     prefix_table: Vec<u64>,
     suffix_table: Vec<u64>,
-    n: usize,
+    data: &'a [u64],
     s: usize,
     block_count: usize,
 }
 
-impl<'a> Rmq<'a> for Blocks{
+impl<'a> Rmq<'a> for Blocks<'a>{
     fn name() -> String {
         "Blocks".to_string()
     }
@@ -282,7 +286,7 @@ impl<'a> Rmq<'a> for Blocks{
             block_minima.push(data[i*block_size..(i + 1)*block_size].iter().copied().min().unwrap());
         }
 
-        let mut prefix_table: Vec<u64> = Vec::with_capacity(n);
+        let mut prefix_table: Vec<u64> = vec![u64::MAX; n];
         let mut suffix_table: Vec<u64> = Vec::with_capacity(n);
 
         let mut minimum = u64::MAX;
@@ -293,18 +297,22 @@ impl<'a> Rmq<'a> for Blocks{
             suffix_table.push(cmp::min(data[i], minimum));
         }
 
+        minimum = u64::MAX;
+
         for i in (0..n).rev() {
             if i % block_size == 0 {
                 minimum = u64::MAX;
             }
-            prefix_table.push(cmp::min(data[i], minimum));
+            prefix_table[i] = cmp::min(data[i], minimum);
         }
 
+        // eprintln!("\nblock_size: {block_size}\tblock_count: {block_count}");
+
         Self {
-            segments: SparseArray::build(&block_minima),
+            blocks: SparseArray::build(&block_minima),
             prefix_table: prefix_table,
             suffix_table: suffix_table,
-            n: n,
+            data: data,
             s: block_size,
             block_count: block_count,
         }
@@ -316,13 +324,27 @@ impl<'a> Rmq<'a> for Blocks{
     }
 
     fn query(&self, l: usize, r: usize) -> u64 {
-        // TODO: Add case where l and r are entirely in one block
-        let l_block = l / self.s + if l % self.s != 0 { 1 } else { 0 };
-        let r_block = r / self.s;
+        let mut l_block = l / self.s;
+        if l % self.s != 0 {
+            l_block += 1;
+        }
+        let mut r_block = (r / self.s);
 
-        let pre_minimum = cmp::min(self.prefix_table[l], self.segments.query(l_block, r_block));
+        let mut total_minimum;
+        if l_block < r_block {
+            assert!(r_block > 0);
+            // let left_minimum = self.prefix_table[l];
+            let left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
+            // let right_minimum = self.suffix_table[r];
+            let right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+            r_block -= 1; // inclusive index
+            let block_minimum = self.blocks.query(l_block, r_block);
+            total_minimum = cmp::min(cmp::min(left_minimum, right_minimum), block_minimum);
+        } else { // case where l and r are in the same block
+            total_minimum = self.data[l..=r].iter().copied().min().unwrap();
+        }
 
-        cmp::min(pre_minimum, self.suffix_table[r])
+        return total_minimum;
     }
 }
 
@@ -600,11 +622,11 @@ fn main() {
     }
     let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
-        // bench::<Naive>(&input, &mut query_monitor);
+        bench::<Naive>(&input, &mut query_monitor);
         //bench::<LookupTable>(&input, query_monitor);
         // bench::<SparseArray>(&input, &mut query_monitor);
         // bench::<SegmentTree>(&input, &mut query_monitor);
-        bench::<Blocks>(&input);
+        bench::<Blocks>(&input, &mut query_monitor);
         // bench::<CartesianTrees>(&input);
         // TODO: Add other implementations here.
     }
