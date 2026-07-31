@@ -120,8 +120,9 @@ impl<'a> Rmq<'a> for SparseArray {
 
     fn max_n() -> usize {
         // NOTE: Do not use this for the improved implementations!
-        10_000
+        1_000_000
     }
+
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         
@@ -179,11 +180,6 @@ struct SegmentTree {
 impl<'a> Rmq<'a> for SegmentTree {
     fn name() -> String {
         "Segment tree".to_string()
-    }
-
-    fn max_n() -> usize {
-        // NOTE: Do not use this for the improved implementations!
-        10_000
     }
 
     fn build(data: &'a [u64]) -> Self {
@@ -255,7 +251,6 @@ struct Blocks<'a> {
     prefix_table: Vec<u64>,
     suffix_table: Vec<u64>,
     data: &'a [u64],
-    cartesian_tree: CartesianTree,
     s: usize,
     block_count: usize,
     pre_calc: bool,
@@ -266,13 +261,8 @@ impl<'a> Rmq<'a> for Blocks<'a>{
         "Blocks".to_string()
     }
 
-    fn max_n() -> usize {
-        // NOTE: Do not use this for the improved implementations!
-        10_000
-    }
     fn build(data: &'a [u64]) -> Self {
         let pre_calc = false;
-        let with_cartesian_tree = true;
         let n = data.len();
         let block_size = n.ilog2() as usize;
         let block_count = n / block_size;
@@ -285,7 +275,6 @@ impl<'a> Rmq<'a> for Blocks<'a>{
 
         let mut prefix_table: Vec<u64>;
         let mut suffix_table: Vec<u64>;
-        let cartesian_tree: CartesianTree = CartesianTree::build(data, block_size);
 
         if pre_calc {
             prefix_table = vec![u64::MAX; n];
@@ -318,7 +307,6 @@ impl<'a> Rmq<'a> for Blocks<'a>{
             prefix_table: prefix_table,
             suffix_table: suffix_table,
             data: data,
-            cartesian_tree: cartesian_tree,
             s: block_size,
             block_count: block_count,
             pre_calc: pre_calc,
@@ -352,15 +340,85 @@ impl<'a> Rmq<'a> for Blocks<'a>{
                 left_minimum = self.prefix_table[l];
                 right_minimum = self.suffix_table[r];
             } else {
-                let old_left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
-                let old_right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
-                left_minimum = self.data[self.cartesian_tree.prefix_query(l)];
-                if r >= self.data.len() / self.s * self.s {
-                    right_minimum =  self.data[r_block * self.s..=r].iter().copied().min().unwrap();
-                } else {
-                    right_minimum = self.data[self.cartesian_tree.suffix_query(r)];
-                }
+                left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
+                right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
             }
+            r_block -= 1; // inclusive index
+            let block_minimum = self.blocks.query(l_block, r_block);
+            total_minimum = cmp::min(cmp::min(left_minimum, right_minimum), block_minimum);
+        } else { // case where l and r are in the same block
+            total_minimum = self.data[l..=r].iter().copied().min().unwrap();
+        }
+
+        return total_minimum;
+    }
+}
+
+struct BlocksWithTrees<'a> {
+    blocks: SparseArray,
+    data: &'a [u64],
+    cartesian_tree: CartesianTree,
+    s: usize,
+    block_count: usize,
+}
+
+impl<'a> Rmq<'a> for BlocksWithTrees<'a>{
+    fn name() -> String {
+        "Cartesian Trees".to_string()
+    }
+
+    fn build(data: &'a [u64]) -> Self {
+        let with_cartesian_tree = true;
+        let n = data.len();
+        let block_size = n.ilog2() as usize;
+        let block_count = n / block_size;
+        let mut block_minima:Vec<u64> = Vec::with_capacity(block_count);
+
+        // TODO: check index in end and beginning
+        for i in 0..block_count {
+            block_minima.push(data[i*block_size..(i + 1)*block_size].iter().copied().min().unwrap());
+        }
+
+        let cartesian_tree: CartesianTree = CartesianTree::build(data, block_size);
+
+        Self {
+            blocks: SparseArray::build(&block_minima),
+            data: data,
+            cartesian_tree: cartesian_tree,
+            s: block_size,
+            block_count: block_count,
+        }
+    }
+
+    /// Space usage in bytes.
+    fn space(&self) -> usize {
+        self.blocks.space() +
+        self.cartesian_tree.space() +
+        size_of_val(self.data) +
+        size_of_val(&self.s) +
+        size_of_val(&self.block_count)
+    }
+
+    fn query(&self, l: usize, r: usize) -> u64 {
+        let mut l_block = l / self.s;
+        if l % self.s != 0 {
+            l_block += 1;
+        }
+        let mut r_block = (r / self.s);
+
+        let mut total_minimum;
+        if l_block < r_block {
+            assert!(r_block > 0);
+            let left_minimum;
+            let right_minimum;
+            
+            left_minimum = self.data[self.cartesian_tree.prefix_query(l)];
+            if r >= self.data.len() / self.s * self.s {
+                right_minimum =  self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+            } else {
+                right_minimum = self.data[self.cartesian_tree.suffix_query(r)];
+            }
+            
             r_block -= 1; // inclusive index
             let block_minimum = self.blocks.query(l_block, r_block);
             total_minimum = cmp::min(cmp::min(left_minimum, right_minimum), block_minimum);
@@ -458,20 +516,6 @@ struct CartesianTree {
 }
 
 impl CartesianTree {
-    fn build_lookup_table_old(block: &[u64]) -> Vec<Vec<usize>> {
-        let mut lookup_table:Vec<Vec<usize>> = Vec::with_capacity(block.len());
-
-        for l in 0..block.len() {
-            let mut row = Vec::with_capacity(block.len() - l);
-            for r in l..block.len() {
-                row.push(block[l..=r].iter().copied().position(|x| block[l..=r].iter().all(|&y| x <= y)).unwrap() + l);
-            }
-            lookup_table.push(row);
-        }
-
-        return lookup_table;
-    }
-
     fn build_lookup_table(block: &[u64]) -> (Vec<usize>, Vec<usize>) {
         let mut prefix_table = vec![usize::MAX; block.len()];
         let mut suffix_table = Vec::with_capacity(block.len());
@@ -522,6 +566,23 @@ impl CartesianTree {
             tree_lookup_tables,
             block_size,
         }
+    }
+
+    fn space(&self) -> usize {
+        let mut total_size;
+        total_size = self.tree_numbers.capacity() * size_of::<VecDeque<usize>>();
+        for i in 0..self.tree_numbers.len() {
+            total_size += self.tree_numbers.capacity() * size_of::<usize>();
+        }
+        total_size += self.tree_lookup_tables.capacity() * size_of::<(VecDeque<usize>,(Vec<usize>, Vec<usize>))>();
+        for (k,(v1, v2)) in &self.tree_lookup_tables {
+            total_size += k.capacity() * size_of::<usize>();
+            total_size += v1.capacity() * size_of::<usize>();
+            total_size += v2.capacity() * size_of::<usize>();
+        }
+        total_size += size_of_val(&self.block_size);
+
+        return total_size;
     }
 
     fn prefix_query(&self, l: usize) -> usize {
@@ -628,10 +689,10 @@ fn main() {
     let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
         bench::<Naive>(&input);
-        //bench::<LookupTable>(&input);
-        // bench::<SparseArray>(&input);
-        // bench::<SegmentTree>(&input);
+        bench::<LookupTable>(&input);
+        bench::<SparseArray>(&input);
+        bench::<SegmentTree>(&input);
         bench::<Blocks>(&input);
-        // bench::<CartesianTree>(&input);
+        bench::<BlocksWithTrees>(&input);
     }
 }

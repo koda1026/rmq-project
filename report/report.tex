@@ -2,20 +2,60 @@
 \nolinenumbers
 
 \title{Range Minimum Queries}
-\author{First Last}{Karlsruhe Institute of Technology, Germany}{}{}{}
+\author{David Koch}{Karlsruhe Institute of Technology, Germany}{}{}{}
 \hideLIPIcs
-
+\authorrunning{D. Koch}
 \begin{document}
 \maketitle
 
 
 \section{Introduction}
-TODO
+In this report different implementations of data structures solving the range minimum query problem will be analyzed. These data structures contain two naive implementations, one doing the computation on the fly, while the other one is a lookup table for all possible ranges to be queried. It should be taken note of, that not all implemented data structures are optimized for the best query time and space usage.\\
+The best performance can be seen for the sparse table. This is because of it's fast query times and ease of implementation.
 
 \section{Methods}
-TODO
+\subsection{Lookup Table}
+The lookup table is implemented using only a single array, calculating the index from the range given. This makes it very fast, the work put into correctly doing this however is unnecessary, as the sparse table shows a faster runtime.
+
+\subsection{Sparse Table}
+The sparse table was first implemented similar to the lookup table. This however quickly became to difficult to maintain, because of which the author reverted to using nested vector lists. This is probably also more cache efficient, than simply using a one dimensional array.
+
+\subsection{Segment Tree}
+The segment tree was very similar in implementation to the sparse table. However the precalculation time is much faster than the sparse table.
+
+\subsection{Blocks}
+This data structure computes the sparse table from before on block minima. If run with the pre\_calc
+attribute set to true, it will precalculate the minima for in-block queries.
+The precalculation is done efficiently, by iterating over the array and keeping track of the minima per block. This can be done with ascending indeces of the list, resulting in a precomputed list of the suffixes. Similarly the prefixes are calculated, while iterating over the list in descending order.
+This results in a much smaller space consumption, than a lookup table.
+
+\subsection{Blocks with Cartesian Trees}
+This is probably the most inefficient implementation of all of these, as it uses a hashmap for the relation between the trees and the precomputed tables. the numbering of the trees is done using a structure called tree number, in case it exceeds the size of a machine word. Considering the significant space usage however, this is probably the cause of the inefficiency.\\
+The structure tree number results in an array of machine words. The implementation decision is based on assuming extremely large tree representations. This should be of course corrected for further use. It is also unclear if the use of an array as key for a hash map, leads to the hash value being calculated on the memory address and not the actual value of the key. This is another aspect, which should be corrected for future use.
 
 \section{Results}
+Since the precomputation time for the sparse table, which is used for the implementations of the cartesian trees and the blocks, is so high, the plots for the sparse array only show the computation on a size up to $10^6$.\\
+
+\subsection{Naive Implementations}
+As one can see in the plots below, the naive solutions, bound the worst cases in space an query time usage. The implementation of the quadratic query, has the best space usage, but worst query time, as expected. The lookup table implementation is worst in space consumption, but interestingly enough, has a worse query time than the sparse table. This is probably based on the aforementioned cache efficiency.
+\subsection{The sparse table}
+The sparse table implementation shows extremely good results for the query time. However, compared to the other non naive methods, except for cartesian trees, the sparse table is the most space consuming.\\
+But the biggest problem in this case is the time required for precomputation, as this is the reason, why there is no benchmark to $10^7$ for this data structure.
+\subsection{The segment tree}
+This data structure showed the best performance in precomputation. This is not shown here of course. The cause of this could be, that there is a significantly smaller number of minimal values, which have to be precomputed for this data structure, than in the case of the sparse table.\\
+In terms of runtime and space usage, it is as expected close to the implementation of blocks, but worse in both.\\
+\subsection{Blocks}
+This data structure is implemented using the sparse table for the block minima. In total this leads to a better performance in query time than the segment tree.\\
+However, since a sparse table is used, the time needed for precomputation is greater than the time required for the segment tree.
+\subsection{The cartesian tree}
+The cartesian tree, is greatly inefficient in space usage, which probably also impacts it's query time, as this leads to more cache misses.\\
+Added to that is the factor, that the computed values for the trees are lists, which probably has a greatly negative impact on the time needed to retrieve elements. Although not known to the author, one could check, whether the cartesian tree actually reuses blocks, since the hash function of the vector lists might not consider the elements of the list, but the memory address.\\
+
+\section{Conclusion}
+The cartesian tree implementation has to be revised, with simpler data types for the keys, and maybe and array instead of a hash map as relation between keys and lookup tables.\\
+The sparse table performes the best in querry time, but has a bad time in precomputation(as mentioned). The most practical of these implementations will be the blocks or segment trees, with a low space usage and a precomputation time, which is reasonable for large tables.\\
+Even though the plots don't show the precomputation time, it was taken into consideration, as it was impossible to calculate the sparse table on data of the size greater than $10^6$ in a reasonable time, which demonstrates the importance for practical considerations.
+
 \begin{figure}[h]
 	\centering
 	\includegraphics[width=.8\linewidth]{../plots/space.png}
@@ -32,6 +72,5 @@ TODO
 	\caption{space-time trade-off}
 \end{figure}
 
-TODO
-
 \end{document}
+
