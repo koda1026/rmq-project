@@ -164,10 +164,6 @@ impl<'a> Rmq<'a> for SparseArray {
         assert!(l <= r); // requirement
         let depth = ((r + 1) - l).ilog2() as usize;
 
-        //if depth == 63 {
-        //    eprintln!("l:{l}, r:{r:b}, depth:{depth}, total_len:{}", self.sparse_table.len());
-        //}
-
         let l_min = self.sparse_table[depth][l];
         let r_min = self.sparse_table[depth][(r + 1) - (0b1 << depth)];
         cmp::min(l_min, r_min)
@@ -240,9 +236,6 @@ impl<'a> Rmq<'a> for SegmentTree {
         while new_l != new_r {
             if new_l & (0b1 << level) != 0{
                 let row = &self.segment_tree[level];
-                //if (new_l >> level) == 3 {
-                //    eprintln!("\nData struct len:{}, row len:{}\nl:{:b}\t{}\t{:b}\nr:{:b}\t{}\t{:b}", self.segment_tree.len(), row.len(), l,l,new_l,r, r,new_r);
-                //}
                 total_minimum = cmp::min(row[new_l >> level], total_minimum);
                 new_l += 0b1 << level;
             }
@@ -320,8 +313,6 @@ impl<'a> Rmq<'a> for Blocks<'a>{
             suffix_table = Vec::with_capacity(0);
         }
 
-        // eprintln!("\nblock_size: {block_size}\tblock_count: {block_count}");
-
         Self {
             blocks: SparseArray::build(&block_minima),
             prefix_table: prefix_table,
@@ -361,14 +352,11 @@ impl<'a> Rmq<'a> for Blocks<'a>{
                 left_minimum = self.prefix_table[l];
                 right_minimum = self.suffix_table[r];
             } else {
-                let l_block_con = &self.data[l..=l_block * self.s];
-                let old_left_minimum = l_block_con.iter().copied().min().unwrap();
-                let cont_left_index_min = l_block_con.iter().copied().position(|x| l_block_con.iter().all(|&y| x <= y)).unwrap();
-                let r_block_con = &self.data[r_block * self.s..=r];
-                let old_right_minimum = r_block_con.iter().copied().min().unwrap();
+                let old_left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
+                let old_right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
                 left_minimum = self.data[self.cartesian_tree.prefix_query(l)];
                 if r >= self.data.len() / self.s * self.s {
-                    right_minimum =  r_block_con.iter().copied().min().unwrap();
+                    right_minimum =  self.data[r_block * self.s..=r].iter().copied().min().unwrap();
                 } else {
                     right_minimum = self.data[self.cartesian_tree.suffix_query(r)];
                 }
@@ -588,37 +576,8 @@ fn read_input(file: &Path) -> Input {
     Input { data, queries }
 }
 
-/// Monitor the queries during bench
-struct Query_Monitor {
-    name: String,
-    queries: Vec<(usize, usize, u64)>,
-}
-
-impl Query_Monitor {
-    fn build(name: String) -> Self{
-        Self {
-            name: name,
-            queries: Vec::new(),
-        }
-    }
-
-    fn add_query(&mut self, left: usize, right: usize, minimum: u64) {
-        self.queries.push((left, right, minimum));
-    }
-
-    fn write_to_file(&mut self, file_name: String) {
-        let mut data: String = String::new();
-        data.push_str(&self.name);
-        data.push_str(&"\n".to_string());
-        for i in 0..self.queries.len() {
-            data.push_str(format!("l:{}\tr:{}\t{}\n", self.queries[i].0, self.queries[i].1, self.queries[i].2).as_str());
-        }
-        println!("{}", data);
-    }
-}
-
 /// Bench the given RMQ implementation on the given input, and print the results in CSV format.
-fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input, query_monitor: &mut HashMap<(usize, usize), u64>) {
+fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
     eprint!("{:>10}\t{:>30}\t", input.data.len(), RMQ::name());
     if input.data.len() > RMQ::max_n() {
         eprintln!("skipped");
@@ -631,26 +590,18 @@ fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input, query_monitor: &mut HashMap<(usize,
     let mut sum:u64 = 0;
     for &(l, r) in &input.queries {
         let minimum = rmq.query(l, r);
-        if query_monitor.contains_key(&(l,r)) {
-            let old = query_monitor[&(l,r)];
-            if old != minimum {
-                println!("l:{}\tr:{}\tinterval_size:{}\told:{}\tnew:{}",l,r,r-l,old,minimum);
-            }
-        } else {
-            query_monitor.insert((l,r), minimum);
-        }
         sum = sum.wrapping_add(minimum);
     }
     let elapsed = start.elapsed().as_nanos() as f64 / input.queries.len() as f64;
-    //println!(
-    //    "{},{},\"{}\",{},{},{}",
-    //    input.data.len(),
-    //    input.queries.len(),
-    //    RMQ::name(),
-    //    rmq.space(),
-    //    sum,
-    //    elapsed
-    //);
+    println!(
+        "{},{},\"{}\",{},{},{}",
+        input.data.len(),
+        input.queries.len(),
+        RMQ::name(),
+        rmq.space(),
+        sum,
+        elapsed
+    );
     eprintln!("{:>3}\t{:>8.2}ns/q", sum % 1000, elapsed);
 }
 
@@ -676,12 +627,12 @@ fn main() {
     }
     let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
-        bench::<Naive>(&input, &mut query_monitor);
-        //bench::<LookupTable>(&input, query_monitor);
-        // bench::<SparseArray>(&input, &mut query_monitor);
-        // bench::<SegmentTree>(&input, &mut query_monitor);
-        bench::<Blocks>(&input, &mut query_monitor);
-        // bench::<CartesianTree>(&input, &mut query_monitor);
+        bench::<Naive>(&input);
+        //bench::<LookupTable>(&input);
+        // bench::<SparseArray>(&input);
+        // bench::<SegmentTree>(&input);
+        bench::<Blocks>(&input);
+        // bench::<CartesianTree>(&input);
         // TODO: Add other implementations here.
     }
 }
