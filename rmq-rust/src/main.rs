@@ -606,7 +606,7 @@ fn bench<'a, RMQ: Rmq<'a>>(input: &'a Input) {
 }
 
 fn main() {
-    //println!("n,q,name,space,sum,time");
+    println!("n,q,name,space,sum,time");
 
     let file_or_dir = PathBuf::from(std::env::args().nth(1).expect("Usage: bench <input_dir>"));
 
@@ -633,6 +633,5 @@ fn main() {
         // bench::<SegmentTree>(&input);
         bench::<Blocks>(&input);
         // bench::<CartesianTree>(&input);
-        // TODO: Add other implementations here.
     }
 }
