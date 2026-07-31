@@ -118,11 +118,6 @@ impl<'a> Rmq<'a> for SparseArray {
         "Sparse Array".to_string()
     }
 
-    fn max_n() -> usize {
-        // NOTE: Do not use this for the improved implementations!
-        1_000_000
-    }
-
     fn build(data: &'a [u64]) -> Self {
         let n = data.len();
         
