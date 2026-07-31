@@ -43,7 +43,7 @@ impl<'a> Rmq<'a> for Naive<'a> {
     }
     fn max_n() -> usize {
         // NOTE: Do not use this for the improved implementations!
-        1000
+        10_000
     }
     fn build(data: &'a [u64]) -> Self {
         Self { data }
@@ -275,7 +275,7 @@ impl<'a> Rmq<'a> for Blocks<'a>{
 
     fn max_n() -> usize {
         // NOTE: Do not use this for the improved implementations!
-        1000
+        10_000
     }
     fn build(data: &'a [u64]) -> Self {
         let pre_calc = false;
@@ -361,11 +361,14 @@ impl<'a> Rmq<'a> for Blocks<'a>{
                 left_minimum = self.prefix_table[l];
                 right_minimum = self.suffix_table[r];
             } else {
-                let old_left_minimum = self.data[l..=l_block * self.s].iter().copied().min().unwrap();
-                let old_right_minimum = self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+                let l_block_con = &self.data[l..=l_block * self.s];
+                let old_left_minimum = l_block_con.iter().copied().min().unwrap();
+                let cont_left_index_min = l_block_con.iter().copied().position(|x| l_block_con.iter().all(|&y| x <= y)).unwrap();
+                let r_block_con = &self.data[r_block * self.s..=r];
+                let old_right_minimum = r_block_con.iter().copied().min().unwrap();
                 left_minimum = self.data[self.cartesian_tree.prefix_query(l)];
                 if r >= self.data.len() / self.s * self.s {
-                    right_minimum =  self.data[r_block * self.s..=r].iter().copied().min().unwrap();
+                    right_minimum =  r_block_con.iter().copied().min().unwrap();
                 } else {
                     right_minimum = self.data[self.cartesian_tree.suffix_query(r)];
                 }
@@ -462,12 +465,12 @@ impl TreeNumber{
 
 struct CartesianTree {
     tree_numbers: Vec<VecDeque<usize>>,
-    tree_lookup_tables: HashMap<VecDeque<usize>,Vec<Vec<usize>>>,
+    tree_lookup_tables: HashMap<VecDeque<usize>,(Vec<usize>, Vec<usize>)>,
     block_size: usize,
 }
 
 impl CartesianTree {
-    fn build_lookup_table(block: &[u64]) -> Vec<Vec<usize>> {
+    fn build_lookup_table_old(block: &[u64]) -> Vec<Vec<usize>> {
         let mut lookup_table:Vec<Vec<usize>> = Vec::with_capacity(block.len());
 
         for l in 0..block.len() {
@@ -480,12 +483,40 @@ impl CartesianTree {
 
         return lookup_table;
     }
+
+    fn build_lookup_table(block: &[u64]) -> (Vec<usize>, Vec<usize>) {
+        let mut prefix_table = vec![usize::MAX; block.len()];
+        let mut suffix_table = Vec::with_capacity(block.len());
+
+        let mut minimum = u64::MAX;
+        let mut min_index = 0;
+        for i in 0..block.len() {
+            if block[i] < minimum {
+                min_index = i;
+                minimum = block[i];
+            }
+            suffix_table.push(min_index);
+        }
+
+        minimum = u64::MAX;
+        min_index = 0;
+
+        for i in (0..block.len()).rev() {
+            if block[i] < minimum {
+                min_index = i;
+                minimum = block[i];
+            }
+            prefix_table[i] = min_index;
+        }
+
+        (prefix_table, suffix_table)
+    }
    
     fn build(data: &[u64], block_size: usize) -> Self {
         // let block_size = (data.len().ilog2() / 4) as usize;
         let block_count = data.len() / block_size;
         let mut tree_numbers:Vec<VecDeque<usize>> = Vec::with_capacity(block_count);
-        let mut tree_lookup_tables:HashMap<VecDeque<usize>, Vec<Vec<usize>>> = HashMap::new();
+        let mut tree_lookup_tables:HashMap<VecDeque<usize>, (Vec<usize>, Vec<usize>)> = HashMap::new();
         
         for block_index in 0..block_count {
             let block = &data[block_index * block_size..(block_index + 1) * block_size];
@@ -509,8 +540,8 @@ impl CartesianTree {
         let mut block_index = l / self.block_size;
 
         let tree_number = &self.tree_numbers[block_index];
-        let lookup_table = &self.tree_lookup_tables[&tree_number];
-        let block_minimum_index = lookup_table[l % self.block_size][lookup_table[l % self.block_size].len() - 1];
+        let lookup_table = &self.tree_lookup_tables[&tree_number].0;
+        let block_minimum_index = lookup_table[l % self.block_size];
 
         block_minimum_index + block_index * self.block_size
     }
@@ -519,8 +550,8 @@ impl CartesianTree {
         let block_index = r / self.block_size;
 
         let tree_number = &self.tree_numbers[block_index];
-        let lookup_table = &self.tree_lookup_tables[&tree_number];
-        let block_minimum_index = lookup_table[0][r % self.block_size];
+        let lookup_table = &self.tree_lookup_tables[&tree_number].1;
+        let block_minimum_index = lookup_table[r % self.block_size];
 
         block_minimum_index + block_index * self.block_size
     }
@@ -645,7 +676,7 @@ fn main() {
     }
     let mut query_monitor:HashMap<(usize,usize), u64> = HashMap::new();
     for input in inputs {
-        // bench::<Naive>(&input, &mut query_monitor);
+        bench::<Naive>(&input, &mut query_monitor);
         //bench::<LookupTable>(&input, query_monitor);
         // bench::<SparseArray>(&input, &mut query_monitor);
         // bench::<SegmentTree>(&input, &mut query_monitor);
